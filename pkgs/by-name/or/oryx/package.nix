@@ -21,7 +21,7 @@ rustPlatform.buildRustPackage rec {
     description = "Interactive find and replace in the terminal";
     homepage = "https://github.com/pythops/oryx";
     changelog = "https://github.com/pythops/oryx/commits/v${version}";
-    license = lib.licenses.gnu;
+    license = lib.licenses.fdl13Plus;
     maintainers = with lib.maintainers; [ oakshortbow ];
     mainProgram = "oryx";
   };
