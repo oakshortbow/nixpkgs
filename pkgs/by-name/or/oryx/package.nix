@@ -2,6 +2,7 @@
   lib,
   rustPlatform,
   fetchFromGitHub,
+  bpf-linker,
 }:
 
 rustPlatform.buildRustPackage rec {
@@ -18,6 +19,8 @@ rustPlatform.buildRustPackage rec {
   cargoHash = "sha256-u4Hu924dEBGzSZ2ywISxzuh4PK5LX8O/mEFgMBtYnf0=";
   # Oryx depends on trivial_bounds unstable feature
   env.RUSTC_BOOTSTRAP = 1;
+
+  nativeBuildInputs = [ bpf-linker ];
   buildPhase = ''
     cargo xtask build --release
   '';
