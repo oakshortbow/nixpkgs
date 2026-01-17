@@ -12,16 +12,16 @@ rustPlatform.buildRustPackage rec {
     owner = "pythops";
     repo = "oryx";
     rev = "v${version}";
-    hash = "RANDOM_SHA";
+    hash = "sha256-f3bKfc1M2LBLrFv5gHhNP8PmIDIQi8WcJZ01z7MEnq8=";
   };
 
-  cargoHash = "RANDOM_NOISE";
+  cargoHash = lib.fakeHash;
 
   meta = {
     description = "Interactive find and replace in the terminal";
     homepage = "https://github.com/pythops/oryx";
     changelog = "https://github.com/pythops/oryx/commits/v${version}";
-    license = lib.licenses.fdl13Plus;
+    license = lib.licenses.gnu;
     maintainers = with lib.maintainers; [ oakshortbow ];
     mainProgram = "oryx";
   };
