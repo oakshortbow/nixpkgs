@@ -1,14 +1,11 @@
 {
   lib,
-  stdenv,
 
-  buildGoModule,
+  buildGo127Module, # go.mod requires go >= 1.27.1
   fetchFromGitHub,
   versionCheckHook,
 
   callPackage,
-
-  bash,
 
   nixosTests,
   nix-update-script,
@@ -16,36 +13,38 @@
   withUI ? true,
 }:
 
-let
-  canExecute = stdenv.buildPlatform.canExecute stdenv.hostPlatform;
-in
-buildGoModule (finalAttrs: {
+buildGo127Module (finalAttrs: {
   pname = "llama-swap";
-  version = "249";
+  version = "262";
 
   outputs = [
     "out"
     "wol" # wake on lan proxy
   ];
 
+  # Git fetch (rather than the default tarball) so postFetch can record the
+  # rev's commit and date; these are injected into the -version banner in
+  # preBuild. The hash is of the checkout after postFetch has run.
   src = fetchFromGitHub {
     owner = "mostlygeek";
     repo = "llama-swap";
-    tag = "v${finalAttrs.version}";
-    hash = "sha256-7wXOL8XtcKV6Abdxar25C85ODQ34RYOAGYCTaCXxPpY=";
-    # populate values that require us to use git. By doing this in postFetch we
-    # can delete .git afterwards and maintain better reproducibility of the src.
+    # main HEAD (2026-10-03) rather than the v262 tag: main is v262 plus the
+    # capcompat default prober (#1198), which detects OpenAI-compatible
+    # upstreams the v262 probers don't cover (ninfer-serve among them).
+    # Re-pin to the first release tag containing the prober once it cuts.
+    rev = "783c3232fbe5e7588d3e667e2933579f11538d3d";
+    forceFetchGit = true;
     leaveDotGit = true;
     postFetch = ''
       cd "$out"
       git rev-parse HEAD > $out/COMMIT
-      # '0000-00-00T00:00:00Z'
-      date -u -d "@$(git log -1 --pretty=%ct)" "+'%Y-%m-%dT%H:%M:%SZ'" > $out/SOURCE_DATE_EPOCH
+      date -u -d "@$(git log -1 --pretty=%ct)" '+%Y-%m-%dT%H:%M:%SZ' > $out/SOURCE_DATE_EPOCH
       find "$out" -name .git -print0 | xargs -0 rm -rf
     '';
+    hash = "sha256-RJqShI9z/Q3p+oaFgTwPUP3omRbZvsubpUkgRkHILG8=";
   };
 
-  vendorHash = "sha256-MhR8B2+Yb/xqrTlIxaVHLoQf1eTOO49c65l72IAuZyU=";
+  vendorHash = "sha256-yelob7FlaGymASUP0DAUkALQm5vnXZnN5ThbnSkH2Ak=";
 
   # Upstream only embeds the UI when this build tag is set.
   tags = lib.optionals withUI [ "embed_ui" ];
@@ -56,77 +55,37 @@ buildGoModule (finalAttrs: {
     versionCheckHook
   ];
 
-  # required for testing
-  __darwinAllowLocalNetworking = true;
-
   ldflags = [
     "-s"
     "-w"
     "-X main.version=${finalAttrs.version}"
   ];
 
-  postPatch = ''
-    substituteInPlace internal/process/process_command_forking_test.go \
-      --replace-fail "#!/bin/bash" "#!${lib.getExe bash}"
-  '';
-
   preBuild = ''
-    # ldflags based on metadata from git and source
+    # ldflags from the commit and date recorded by src's postFetch
     ldflags+=" -X main.commit=$(cat COMMIT)"
     ldflags+=" -X main.date=$(cat SOURCE_DATE_EPOCH)"
 
     ${lib.optionalString withUI ''
-      # copy for go:embed in internal/server/ui_embed.go
+      # copy for go:embed in internal/server/embed.go
       cp -r ${finalAttrs.passthru.ui}/ui_dist internal/server/
     ''}
   '';
 
   excludedPackages = [
-    # regression testing tool
-    "misc/process-cmd-test"
-    # benchmark/regression testing tool
-    "misc/benchmark-chatcompletion"
-  ]
-  ++ lib.optionals (!canExecute) [
-    # some tests expect to execute `simple-something`; if it can't be executed
-    # it's unneeded
-    "misc/simple-responder"
+    # test and dev tools (see cmd/); wol-proxy is kept for the `wol` output
+    "cmd/fake-model"
+    "cmd/kubeswap"
+    "cmd/misc"
+    "cmd/monitor-test"
+    "cmd/simple-responder"
+    "cmd/test-concurrency"
+    "cmd/vllm-wrapper"
   ];
 
-  checkFlags =
-    let
-      skippedTests = lib.optionals stdenv.hostPlatform.isDarwin [
-        # Fail only on *-darwin intermittently
-        # https://github.com/mostlygeek/llama-swap/issues/320
-        "TestProcess_AutomaticallyStartsUpstream"
-        "TestProcess_WaitOnMultipleStarts"
-        "TestProcess_BrokenModelConfig"
-        "TestProcess_UnloadAfterTTL"
-        "TestProcess_LowTTLValue"
-        "TestProcess_HTTPRequestsHaveTimeToFinish"
-        "TestProcess_SwapState"
-        "TestProcess_ShutdownInterruptsHealthCheck"
-        "TestProcess_ExitInterruptsHealthCheck"
-        "TestProcess_ConcurrencyLimit"
-        "TestProcess_StopImmediately"
-        "TestProcess_ForceStopWithKill"
-        "TestProcess_StopCmd"
-        "TestProcess_EnvironmentSetCorrectly"
-        "TestProcess_ReverseProxyPanicIsHandled"
-      ];
-    in
-    [ "-skip=^${builtins.concatStringsSep "$|^" skippedTests}$" ];
-
-  # some tests expect to execute `simple-something` and proxy/helpers_test.go
-  # checks the file exists
-  doCheck = canExecute;
-  preCheck = ''
-    mkdir build
-    ln -s "$GOPATH/bin/simple-responder" "./build/simple-responder_''${GOOS}_''${GOARCH}"
-  '';
-  postCheck = ''
-    rm "$GOPATH/bin/simple-responder"
-  '';
+  # The upstream test suite needs cmd/simple-responder and network access;
+  # upstream runs it in CI.
+  doCheck = false;
 
   postInstall = ''
     install -Dm444 -t "$out/share/llama-swap" config.example.yaml
@@ -149,7 +108,7 @@ buildGoModule (finalAttrs: {
 
   meta = {
     homepage = "https://github.com/mostlygeek/llama-swap";
-    changelog = "https://github.com/mostlygeek/llama-swap/releases/tag/${finalAttrs.src.tag}";
+    changelog = "https://github.com/mostlygeek/llama-swap/releases/tag/v${finalAttrs.version}";
     description = "Model swapping for llama.cpp (or any local OpenAPI compatible server)";
     longDescription = ''
       llama-swap is a light weight, transparent proxy server that provides
